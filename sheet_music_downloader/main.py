@@ -10,7 +10,27 @@ from selenium.webdriver.support import expected_conditions as EC
 from yt_dlp import YoutubeDL
 import fitz
 import sheet_music_downloader.credentials as credentials
+import time
+import sys
 
+
+def close_last_tab(driver):
+    if (len(driver.window_handles) == 2):
+        driver.switch_to.window(window_name=driver.window_handles[-1])
+        driver.close()
+        driver.switch_to.window(window_name=driver.window_handles[0])
+
+def install_extensions(driver):
+    extension_path = f"{credentials.extensions_location}/adblock_plus-3.23.xpi"
+    extension_full_path = os.path.realpath(os.path.expanduser(extension_path))
+    driver.install_addon(extension_full_path)
+    time.sleep(5)
+    close_last_tab(driver)
+    #extension_path = f"{credentials.extensions_location}/i_m_not_robot_captcha_clicker-1.3.1.xpi"
+    #extension_full_path = os.path.realpath(os.path.expanduser(extension_path))
+    #driver.install_addon(extension_full_path)
+    #time.sleep(5)
+    #close_last_tab(driver)
 
 def get_driver(headless=False, download_dir=credentials.download_path):
     print("get_driver")
@@ -31,22 +51,23 @@ def get_driver(headless=False, download_dir=credentials.download_path):
     return driver
 
 def set_download_dir(driver, directory):
-      driver.command_executor._commands["SET_CONTEXT"] = ("POST", "/session/$sessionId/moz/context")
-      driver.execute("SET_CONTEXT", {"context": "chrome"})
+    full_path = os.path.realpath(os.path.expanduser(directory))
+    driver.command_executor._commands["SET_CONTEXT"] = ("POST", "/session/$sessionId/moz/context")
+    driver.execute("SET_CONTEXT", {"context": "chrome"})
 
-      driver.execute_script("""
+    driver.execute_script("""
         Services.prefs.setBoolPref('browser.download.useDownloadDir', true);
         Services.prefs.setStringPref('browser.download.dir', arguments[0]);
-        """, directory)
+        """, full_path)
 
-      driver.execute("SET_CONTEXT", {"context": "content"})
+    driver.execute("SET_CONTEXT", {"context": "content"})
 
 def open_url(driver, url):
     print(f"open_url start {url}")
     driver.get(url)
     print(f"open_url end {url}")
 
-def wait(driver, xpath, timeout=120):
+def wait(driver, xpath, timeout=3600):
     print(f"wait start [{xpath}, {timeout}]")
     WebDriverWait(driver, timeout).until(EC.visibility_of_element_located((By.XPATH, xpath)))
     print(f"wait end [{xpath}, {timeout}]")
@@ -73,7 +94,16 @@ def get_title(driver):
     print("get_title start")
     wait(driver, '//*[@class="breadcrumb"]')
     title = driver.find_element(by=By.CLASS_NAME, value="breadcrumb").text
-    title = clean_up_text(title)
+    print(f"[DEBUG], [{title}]")
+    title = title.lower()
+    title = title.replace("/", " ")
+    title = title.replace("(", " ")
+    title = title.replace(")", " ")
+    title = title.replace("&", " ")
+    title = title.replace(".", " ")
+    title = title.replace("'", " ")
+    title = " ".join(title.split())
+    title = title.replace(" ", "_")
     print("get_title end")
     return title
 
@@ -91,7 +121,7 @@ def get_parts(driver):
 
 def get_youtube_url(driver):
     print("get_youtube_url start")
-    wait(driver, '//*[@id="videoPreviewViewer"]')
+    wait(driver, '//*[@id="videoPreviewViewer"]', timeout=10)
     iframe = driver.find_element(by=By.ID, value="videoPreviewViewer")
     return iframe.get_attribute("src")
 
@@ -147,20 +177,22 @@ def clean_pdf(filename):
     doc = fitz.open(tmp_filename)  # the file with the text you want to change
     for page in doc:
         replace_text = get_replace_text_from_page(page)
-        print(replace_text)
-        found = page.search_for(replace_text)  # list of rectangles where to replace
-        for item in found:
-            page.add_redact_annot(item, '')  # create redaction for text
-            page.apply_redactions()  # apply the redaction now
-            #page.insert_text(item.bl - (0, 3), "")
+        if replace_text is not None:
+            print(replace_text)
+            found = page.search_for(replace_text)  # list of rectangles where to replace
+            for item in found:
+                page.add_redact_annot(item, '')  # create redaction for text
+                page.apply_redactions()  # apply the redaction now
+                #page.insert_text(item.bl - (0, 3), "")
     doc.save(filename)
     os.remove(tmp_filename)
 
 def clean_pdfs(path):
     print(f"[CLEAN_PDFS] {path}")
-    for filename in os.listdir(path):
+    full_path = os.path.realpath(os.path.expanduser(path))
+    for filename in os.listdir(full_path):
         if filename.endswith(".pdf"):
-            f = os.path.join(path, filename)
+            f = os.path.join(full_path, filename)
             if os.path.isfile(f):
                 clean_pdf(f)
 
@@ -169,12 +201,15 @@ def download_parts(driver, id):
     open_url(driver, get_song_url(id))
     title = get_title(driver)
     print(f"[DOWN_PRT]: title {title}, {id}")
-    download_dir = f"{credentials.download_path}/{title}"
+    download_dir = f"{credentials.download_path}/{title}_{id}"
     print(f"[DOWN_PRT]: download_dir {download_dir}")
     set_download_dir(driver, download_dir) 
-    youtube_url = get_youtube_url(driver)
-    print(f"[DOWN_PRT]: youtube_url {youtube_url}")
-    download_youtube_video(youtube_url, download_dir)
+    try:
+        youtube_url = get_youtube_url(driver)
+        print(f"[DOWN_PRT]: youtube_url {youtube_url}")
+        download_youtube_video(youtube_url, download_dir)
+    except:
+        print("[DOWN_PRT]: Error, no youtube video, skiping")
     #from IPython import embed; embed()
     parts = get_parts(driver)
     index = 0
@@ -186,13 +221,13 @@ def download_parts(driver, id):
     clean_pdfs(download_dir)
 
 def run():
-    import sys
     try:
         id = sys.argv[1]
     except:
         print("[RUN]: Error: song ID not provided")
         sys.exit(1)
     driver = get_driver()
+    install_extensions(driver)
     download_parts(driver, id)
     #from IPython import embed; embed()
     driver.close()
