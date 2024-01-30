@@ -9,10 +9,10 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from yt_dlp import YoutubeDL
 import fitz
-import credentials
+import sheet_music_downloader.credentials as credentials
 
 
-def get_driver(headless=False, download_dir=DOWNLOAD_PATH):
+def get_driver(headless=False, download_dir=credentials.download_path):
     print("get_driver")
     options = Options()
     options.set_preference('network.proxy.type', 4)
@@ -141,6 +141,7 @@ def get_replace_text_from_page(page):
     return None
 
 def clean_pdf(filename):
+    print(f"[CLEAN_PDF] {filename}")
     tmp_filename = filename + ".tmp"
     os.rename(filename, tmp_filename)
     doc = fitz.open(tmp_filename)  # the file with the text you want to change
@@ -156,6 +157,7 @@ def clean_pdf(filename):
     os.remove(tmp_filename)
 
 def clean_pdfs(path):
+    print(f"[CLEAN_PDFS] {path}")
     for filename in os.listdir(path):
         if filename.endswith(".pdf"):
             f = os.path.join(path, filename)
@@ -166,26 +168,35 @@ def download_parts(driver, id):
     login(driver)
     open_url(driver, get_song_url(id))
     title = get_title(driver)
+    print(f"[DOWN_PRT]: title {title}, {id}")
     download_dir = f"{credentials.download_path}/{title}"
+    print(f"[DOWN_PRT]: download_dir {download_dir}")
     set_download_dir(driver, download_dir) 
     youtube_url = get_youtube_url(driver)
+    print(f"[DOWN_PRT]: youtube_url {youtube_url}")
     download_youtube_video(youtube_url, download_dir)
     #from IPython import embed; embed()
-    print(f"working with {title}, {id}")
     parts = get_parts(driver)
     index = 0
     total_len = len(parts)
     for name, url in parts.items():
         index += 1
-        print(f"{index}/{total_len} {name}")
+        print(f"[DOWN_PRT] part {index}/{total_len} {name}")
         download_part(driver, url)
     clean_pdfs(download_dir)
 
-
-if __name__ == "__main__":
+def run():
     import sys
-    id = sys.argv[1]
+    try:
+        id = sys.argv[1]
+    except:
+        print("[RUN]: Error: song ID not provided")
+        sys.exit(1)
     driver = get_driver()
     download_parts(driver, id)
     #from IPython import embed; embed()
     driver.close()
+
+
+if __name__ == "__main__":
+    run()
